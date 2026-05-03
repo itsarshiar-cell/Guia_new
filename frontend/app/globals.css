@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+:root {
+  --font-figtree: 'Figtree', sans-serif;
+  --brand-orange: #DD5115;
+  
+  /* 1. Default to DARK */
+  --background: #0a0a0a; 
+  --foreground: #ededed; 
+}
+
+/* 2. Override for LIGHT */
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: #ffffff;
+    --foreground: #171717;
+  }
+}
+
+/* 3. Use @theme (NO '@layer') */
+@theme {
+  --font-sans: var(--font-figtree);
+  --color-orange: var(--brand-orange);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+/* 4. Apply to Body */
+body {
+  background-color: color-mix(in srgb, var(--brand-orange), transparent 20%); /* Using the orange with opacity for a subtle background */
+  color: var(--foreground);
+  font-family: var(--font-figtree), sans-serif;
+}
