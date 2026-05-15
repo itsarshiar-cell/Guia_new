@@ -10,7 +10,7 @@ const Header = () => {
         3. max-w-7xl: Standard "safe" width for content (approx 1280px)
       */}
       <div className="mx-auto flex min-h-17.5 max-w-7xl items-center justify-between px-6 md:px-12 py-4 text-white">
-        <Link href="/home" className="hover:opacity-70 transition"><Logo /></Link>
+        <Link href="/" className="hover:opacity-70 transition"><Logo /></Link>
         <NavBar />
       </div>
     </header>
