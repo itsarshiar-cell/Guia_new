@@ -89,6 +89,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Header from "../components/Header";
+import MyButton from "../components/MyButton";
+import Link from "next/link";
 
 export default function AnalyzePage() {
   const videoRef = useRef(null);
@@ -208,21 +211,16 @@ export default function AnalyzePage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 px-6 py-12">
-      <div className="w-full max-w-3xl rounded-2xl bg-white p-8 shadow-md">
-        <h1 className="mb-4 text-3xl font-semibold text-zinc-900">
-          Live Camera Analyzer
-        </h1>
-
-        <p className="mb-6 text-zinc-600">
-          ITS WORKING
-        </p>
+    <div>
+      <Header />
+    <div className="flex flex-col py-10 items-center justify-center text-white">
+      <div className="w-full max-w-6xl rounded-3xl bg-orange p-8">
 
         <div className="mb-6 flex gap-3">
           <button
             type="button"
             onClick={startCamera}
-            className="rounded-lg bg-black px-4 py-2 text-white"
+            className="backdrop-blur-md border border-white/20 rounded-3xl bg-white/10 hover:bg-white/20 transition-all shadow-xl px-4 py-2"
           >
             Start Camera
           </button>
@@ -230,7 +228,7 @@ export default function AnalyzePage() {
           <button
             type="button"
             onClick={stopCamera}
-            className="rounded-lg border border-zinc-300 px-4 py-2"
+            className="backdrop-blur-md border border-white/20 rounded-3xl bg-white/10 hover:bg-white/20 transition-all shadow-xl px-4 py-2"
           >
             Stop Camera
           </button>
@@ -240,7 +238,7 @@ export default function AnalyzePage() {
           <p className="mb-4 text-sm text-red-600">{cameraError}</p>
         )}
 
-        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-black">
+        <div className="overflow-hidden rounded-xl bg-orange">
           <video
             ref={videoRef}
             autoPlay
@@ -250,21 +248,22 @@ export default function AnalyzePage() {
           />
         </div>
 
-        <p className="mt-4 text-sm text-zinc-500">
+        <p className="mt-4 text-sm text-white">
           Camera status: {isCameraOn ? "On" : "Off"}
         </p>
-
-        <div className="mt-6 rounded-lg border border-zinc-200 bg-zinc-100 p-4">
-          <h2 className="mb-2 text-lg font-medium text-zinc-900">
-            Gemini Response
-          </h2>
-
-          <p className="whitespace-pre-wrap text-zinc-700">
-            {result || "Waiting for Gemini response..."}
-          </p>
-        </div>
+  
         
       </div>
+    <div className="mt-10 w-full max-w-6xl rounded-3xl bg-orange p-8">
+        <h2 className="mb-4 text-2xl font-semibold text-white">
+          Transcript
+        </h2>
+
+        <p className="mb-6 text-white">
+          {result || "Waiting for Gemini response..."}
+        </p>
+      </div>
+    </div>
     </div>
   );
 }
