@@ -26,7 +26,7 @@ const IntroPage = () => {
 
   {/* Right Side: The Box */}
   <div className="flex justify-start origin-bottom-left pl-10 pr-20 pt-15">
-      <Link href="/demo"><MyButton text="Get Started" /></Link>
+      <Link href="/analyze"><MyButton text="Get Started" /></Link>
   </div>
   </div>
   {/* */}

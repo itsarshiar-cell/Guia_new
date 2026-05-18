@@ -92,29 +92,40 @@ import { useEffect, useRef, useState } from "react";
 import Header from "../components/Header";
 import MyButton from "../components/MyButton";
 import Link from "next/link";
+import { Camera, Mic } from 'lucide-react';
+import { MicVAD } from "@ricky0123/vad-web";
 
 export default function AnalyzePage() {
   const videoRef = useRef(null);
   const socketRef = useRef(null);
+  const audioSocketRef = useRef(null);
   const streamRef = useRef(null);
+  const audioStreamRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
   const frameIntervalRef = useRef(null);
   const isAnalysingRef = useRef(false);
+  const vadRef = useRef(null);
 
   const [isCameraOn, setIsCameraOn] = useState(false);
+  const [isAudioOn, setIsAudioOn] = useState(false);
   const [cameraError, setCameraError] = useState("");
+  const [audioError, setAudioError] = useState("");
+  const [audioBytesSent, setAudioBytesSent] = useState(0);
   const [result, setResult] = useState("");
+  const [messages, setMessages] = useState([]);
 
   useEffect(() => {
     import("socket.io-client").then(({ default: io }) => {
-      const socket = io("http://localhost:3001", { reconnection: true, transports: ["websocket"] });
+      const socket = io("http://localhost:3001/visual", { reconnection: true, transports: ["websocket"] });
+      const audioSocket = io("http://localhost:3001/audio", { reconnection: true, transports: ["websocket"] });
 
       socket.on("connect", () => {
-        console.log("Connected to WebSocket server");
+        console.log("Connected to visual WebSocket server");
       });
 
       socket.on("connect_error", (error) => {
-        console.error("Socket connect error", error);
-        setCameraError(`Connection failed: ${error?.message || error}`);
+        console.error("Visual socket connect error", error);
+        setCameraError(`Visual connection failed: ${error?.message || error}`);
       });
 
       socket.on("server-error", (data) => {
@@ -134,6 +145,82 @@ export default function AnalyzePage() {
       });
 
       socketRef.current = socket;
+
+      audioSocket.on("connect", () => {
+        console.log("Connected to audio WebSocket server");
+      });
+
+      audioSocket.on("connect_error", (error) => {
+        console.error("Audio socket connect error", error);
+        setAudioError(`Audio connection failed: ${error?.message || error}`);
+      });
+
+      audioSocket.on("audio-frame-ack", (data) => {
+        setAudioBytesSent((prev) => prev + (data.bytes || 0));
+      });
+
+      audioSocket.on("audio-event-ack", (data) => {
+        console.log("Audio event acknowledged:", data.type);
+      });
+
+      audioSocket.on("transcript", (data) => {
+        const text = data.text?.trim();
+        if (!text) return;
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "user",
+            text,
+          },
+        ]);
+      });
+
+      audioSocket.on("audio-response-start", () => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text: "",
+          },
+        ]);
+      });
+
+      audioSocket.on("audio-response-chunk", (data) => {
+        const text = data.text || "";
+        if (!text) return;
+
+        setMessages((prev) => {
+          const next = [...prev];
+          const lastMessage = next[next.length - 1];
+
+          if (lastMessage?.role === "assistant") {
+            next[next.length - 1] = {
+              ...lastMessage,
+              text: lastMessage.text + text,
+            };
+            return next;
+          }
+
+          return [
+            ...next,
+            {
+              role: "assistant",
+              text,
+            },
+          ];
+        });
+      });
+
+      audioSocket.on("audio-response-complete", () => {
+        console.log("Audio response complete");
+      });
+
+      audioSocket.on("audio-error", (data) => {
+        setAudioError(data?.message || "Audio transcription failed.");
+      });
+
+      audioSocketRef.current = audioSocket;
     });
 
     return () => {
@@ -143,8 +230,14 @@ export default function AnalyzePage() {
       if (socketRef.current) {
         socketRef.current.disconnect();
       }
+      if (audioSocketRef.current) {
+        audioSocketRef.current.disconnect();
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
   }, []);
@@ -210,58 +303,168 @@ export default function AnalyzePage() {
     });
   }
 
+  function float32ToWavBuffer(audio, sampleRate = 16000) {
+    const numChannels = 1;
+    const bytesPerSample = 2;
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = audio.length * bytesPerSample;
+
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer); 
+
+    function writeString(offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    writeString(0, "RIFF");
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, "WAVE");
+    writeString(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);
+    writeString(36, "data");
+    view.setUint32(40, dataSize, true);
+
+    let offset = 44;
+    for (let i = 0; i < audio.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, audio[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    return buffer;
+  }
+
+async function startAudio() {
+  setAudioError("");
+
+  const vad = await MicVAD.new({
+    baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/",
+    onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
+    
+    onSpeechStart: () => {
+      audioSocketRef.current?.emit("audio-start");
+      
+    },
+    onSpeechEnd: (audio) => {
+      const wavBuffer = float32ToWavBuffer(audio, 16000);
+
+      audioSocketRef.current?.emit("audio-frame", wavBuffer);
+      audioSocketRef.current?.emit("audio-stop");
+    },
+  });
+
+  vadRef.current = vad;
+  vad.start();
+  setIsAudioOn(true);
+}
+
+  function stopAudio() {
+  vadRef.current?.pause();
+  vadRef.current = null;
+  setIsAudioOn(false);
+}
+
   return (
     <div>
       <Header />
     <div className="flex flex-col py-10 items-center justify-center text-white">
       <div className="w-full max-w-6xl rounded-3xl bg-orange p-8">
+        
+        <div className="overflow-hidden rounded-xl bg-orange pb-8">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="h-auto w-full rounded-xl"
+          />
+        </div>
 
-        <div className="mb-6 flex gap-3">
+        <div className="mb-6 flex items-end gap-3 justify-center">
+          <div className ="grid grid-cols-2 gap-3">
           <button
             type="button"
-            onClick={startCamera}
-            className="backdrop-blur-md border border-white/20 rounded-3xl bg-white/10 hover:bg-white/20 transition-all shadow-xl px-4 py-2"
+            onClick={isCameraOn ? stopCamera : startCamera}
+            aria-label={isCameraOn ? "Stop Camera" : "Start Camera"}
+            title={isCameraOn ? "Stop Camera" : "Start Camera"}
+            className={`backdrop-blur-md border border-white/20 rounded-3xl hover:bg-white/20 transition-all shadow-xl px-4 py-2 ${
+              isCameraOn
+                ? "bg-white text-orange border-white"
+                : "bg-white/10 text-white border-white/20"
+            }`}
           >
-            Start Camera
+            <Camera size={35} className="text-white" />
           </button>
 
           <button
             type="button"
-            onClick={stopCamera}
-            className="backdrop-blur-md border border-white/20 rounded-3xl bg-white/10 hover:bg-white/20 transition-all shadow-xl px-4 py-2"
+            onClick={isAudioOn ? stopAudio : startAudio}
+            aria-label={isAudioOn ? "Stop Audio" : "Start Audio"}
+            title={isAudioOn ? "Stop Audio" : "Start Audio"}
+            className={`backdrop-blur-md border border-white/20 rounded-3xl hover:bg-white/20 transition-all shadow-xl px-4 py-2 ${
+              isAudioOn
+                ? "bg-white text-orange border-white"
+                : "bg-white/10 text-white border-white/20"
+            }`}
           >
-            Stop Camera
+            <Mic size={35} className="text-white" />
           </button>
+          </div>
         </div>
 
         {cameraError && (
           <p className="mb-4 text-sm text-red-600">{cameraError}</p>
         )}
 
-        <div className="overflow-hidden rounded-xl bg-orange">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="h-auto w-full"
-          />
-        </div>
+        {audioError && (
+          <p className="mb-4 text-sm text-red-600">{audioError}</p>
+        )}
 
         <p className="mt-4 text-sm text-white">
           Camera status: {isCameraOn ? "On" : "Off"}
+        </p>
+
+        <p className="mt-2 text-sm text-white">
+          Audio status: {isAudioOn ? "Transmitting" : "Off"} · Bytes sent: {audioBytesSent}
         </p>
   
         
       </div>
     <div className="mt-10 w-full max-w-6xl rounded-3xl bg-orange p-8">
         <h2 className="mb-4 text-2xl font-semibold text-white">
-          Transcript
+          Conversation
         </h2>
 
-        <p className="mb-6 text-white">
-          {result || "Waiting for Gemini response..."}
-        </p>
+        <div className="mb-6 flex flex-col gap-3 text-white">
+          {messages.length > 0 ? (
+            messages.map((message, index) => (
+              <div
+                key={`${message.role}-${index}`}
+                className={`max-w-3xl rounded-2xl border border-white/20 px-4 py-3 ${
+                  message.role === "user"
+                    ? "self-end bg-white text-orange"
+                    : "self-start bg-white/10 text-white"
+                }`}
+              >
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide opacity-70">
+                  {message.role === "user" ? "You" : "Guia"}
+                </p>
+                <p className="whitespace-pre-wrap">
+                  {message.text || "Thinking..."}
+                </p>
+              </div>
+            ))
+          ) : (
+            <p>{result || "Waiting for Gemini response..."}</p>
+          )}
+        </div>
       </div>
     </div>
     </div>

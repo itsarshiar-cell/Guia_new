@@ -16,7 +16,7 @@ const Visual = () => {
     <div className="max-w-6xl h-50 mx-auto rounded-3xl bg-white/20 backdrop-blur-md border-white/20 flex items-end pb-10 justify-center shadow-md mb-10">
     </div>
     <div className="max-w-6xl h-15 rounded-3xl bg-white/20 backdrop-blur-md border-white/20 flex items-center mx-auto px-6 left-alignshadow-md">
-    | Ask Guia
+     Ask Guia!
     </div>
     </div>
   )
