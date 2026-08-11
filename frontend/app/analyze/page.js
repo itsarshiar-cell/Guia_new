@@ -92,7 +92,7 @@ import { useEffect, useRef, useState } from "react";
 import Header from "../components/Header";
 import MyButton from "../components/MyButton";
 import Link from "next/link";
-import { Camera, Mic } from 'lucide-react';
+import { Camera, Mic, Send } from 'lucide-react';
 import { MicVAD } from "@ricky0123/vad-web";
 
 export default function AnalyzePage() {
@@ -113,6 +113,8 @@ export default function AnalyzePage() {
   const [audioBytesSent, setAudioBytesSent] = useState(0);
   const [result, setResult] = useState("");
   const [messages, setMessages] = useState([]);
+  const [textInput, setTextInput] = useState("");
+  const [isTextSending, setIsTextSending] = useState(false);
 
   useEffect(() => {
     import("socket.io-client").then(({ default: io }) => {
@@ -213,10 +215,12 @@ export default function AnalyzePage() {
       });
 
       audioSocket.on("audio-response-complete", () => {
+        setIsTextSending(false);
         console.log("Audio response complete");
       });
 
       audioSocket.on("audio-error", (data) => {
+        setIsTextSending(false);
         setAudioError(data?.message || "Audio transcription failed.");
       });
 
@@ -371,6 +375,19 @@ async function startAudio() {
   setIsAudioOn(false);
 }
 
+  function sendTextMessage(event) {
+    event.preventDefault();
+    const text = textInput.trim();
+
+    if (!text || isTextSending || !audioSocketRef.current?.connected) return;
+
+    setAudioError("");
+    setMessages((prev) => [...prev, { role: "user", text }]);
+    setTextInput("");
+    setIsTextSending(true);
+    audioSocketRef.current.emit("text-message", { text });
+  }
+
   return (
     <div>
       <Header />
@@ -465,6 +482,36 @@ async function startAudio() {
             <p>{result || "Waiting for Gemini response..."}</p>
           )}
         </div>
+
+        <form onSubmit={sendTextMessage} className="flex items-end gap-3">
+          <label htmlFor="conversation-input" className="sr-only">
+            Message Guia
+          </label>
+          <textarea
+            id="conversation-input"
+            value={textInput}
+            onChange={(event) => setTextInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                sendTextMessage(event);
+              }
+            }}
+            placeholder="Message Guia"
+            rows={1}
+            disabled={isTextSending}
+            className="min-h-11 flex-1 resize-none rounded-lg border border-white/30 bg-white px-3 py-2 text-orange outline-none placeholder:text-orange/60 focus:border-white disabled:cursor-not-allowed disabled:opacity-70"
+          />
+          <button
+            type="submit"
+            disabled={!textInput.trim() || isTextSending}
+            aria-label="Send message"
+            title="Send message"
+            className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-white bg-white text-orange transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Send size={20} />
+          </button>
+        </form>
       </div>
     </div>
     </div>

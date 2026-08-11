@@ -26,6 +26,39 @@ ${conversation}
 Respond clearly and helpfully. Even if the situation is unrelated to survival, answer briefly and naturally.`;
 }
 
+async function respondToMessage(socket, text, ai, modelName) {
+  const history = addMessage(socket.id, {
+    role: "user",
+    text,
+  });
+
+  const prompt = buildPrompt(history);
+  const stream = await ai.models.generateContentStream({
+    model: modelName,
+    contents: [{ text: prompt }],
+  });
+
+  let assistantText = "";
+  socket.emit("audio-response-start");
+
+  for await (const chunk of stream) {
+    const chunkText = chunk.text;
+    if (chunkText) {
+      assistantText += chunkText;
+      socket.emit("audio-response-chunk", { text: chunkText });
+    }
+  }
+
+  if (assistantText.trim()) {
+    addMessage(socket.id, {
+      role: "assistant",
+      text: assistantText.trim(),
+    });
+  }
+
+  socket.emit("audio-response-complete");
+}
+
 export function registerAudioSocket(namespace, {ai, modelName}) {
   namespace.on("connection", (socket) => {
     console.log(`Audio client connected: ${socket.id}`);
@@ -70,41 +103,11 @@ export function registerAudioSocket(namespace, {ai, modelName}) {
           return;
         }
 
-        const history = addMessage(socket.id, {
-          role: "user",
-          text: transcript,
-        });
-
         socket.emit("transcript", {
           text: transcript,
         });
 
-        const prompt = buildPrompt(history);
-
-        const stream = await ai.models.generateContentStream({
-          model: modelName,
-          contents: [{ text: prompt }],
-        });
-
-        let assistantText = "";
-        socket.emit("audio-response-start");
-
-        for await (const chunk of stream) {
-          const text = chunk.text;
-          if (text) {
-            assistantText += text;
-            socket.emit("audio-response-chunk", { text });
-          }
-        }
-
-        if (assistantText.trim()) {
-          addMessage(socket.id, {
-            role: "assistant",
-            text: assistantText.trim(),
-          });
-        }
-      
-        socket.emit("audio-response-complete");
+        await respondToMessage(socket, transcript, ai, modelName);
 
       } catch (error) {
         socket.emit("audio-error", {
@@ -112,6 +115,22 @@ export function registerAudioSocket(namespace, {ai, modelName}) {
         });
       }
 
+    });
+
+    socket.on("text-message", async (payload) => {
+      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+      if (!text) {
+        socket.emit("audio-error", { message: "Enter a message before sending." });
+        return;
+      }
+
+      try {
+        await respondToMessage(socket, text, ai, modelName);
+      } catch (error) {
+        socket.emit("audio-error", {
+          message: error instanceof Error ? error.message : "Text response failed.",
+        });
+      }
     });
 
     socket.on("audio-stop", () => {
