@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
 import whisper
 import tempfile
+import os
 
 app = FastAPI()
 
@@ -14,10 +15,15 @@ class TranscriptionResponse(BaseModel):
 
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def transcribe(file: UploadFile = File(...)):
-    with tempfile.NamedTemporaryFile(suffix=".wav") as temp:
+    # Windows keeps NamedTemporaryFile open exclusively.  Close it before
+    # asking FFmpeg (via Whisper) to read the file.
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
         temp.write(await file.read())
-        temp.flush()
+        temp_path = temp.name
 
-        result = model.transcribe(temp.name)
+    try:
+        result = model.transcribe(temp_path)
+    finally:
+        os.unlink(temp_path)
 
     return TranscriptionResponse(text=result["text"])
