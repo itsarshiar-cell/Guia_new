@@ -118,8 +118,17 @@ export default function AnalyzePage() {
 
   useEffect(() => {
     import("socket.io-client").then(({ default: io }) => {
-      const socket = io("http://localhost:3001/visual", { reconnection: true, transports: ["websocket"] });
-      const audioSocket = io("http://localhost:3001/audio", { reconnection: true, transports: ["websocket"] });
+      const socketServerUrl = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL;
+
+      const socket = io(`${socketServerUrl}/visual`, {
+        reconnection: true,
+        transports: ["websocket"],
+      });
+
+      const audioSocket = io(`${socketServerUrl}/audio`, {
+        reconnection: true,
+        transports: ["websocket"],
+      });
 
       socket.on("connect", () => {
         console.log("Connected to visual WebSocket server");
