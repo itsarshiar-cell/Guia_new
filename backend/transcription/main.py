@@ -27,3 +27,9 @@ async def transcribe(file: UploadFile = File(...)):
         os.unlink(temp_path)
 
     return TranscriptionResponse(text=result["text"])
+
+
+# Health endpoint to check if the service is running
+@app.get("/health")
+def health():
+    return {"status": "ok"}
