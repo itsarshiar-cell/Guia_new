@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
 
 const PORT = process.env.PORT || 3001;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:3000";
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "https://guia-new-xi.vercel.app";
 const MODEL_NAME = process.env.GEMINI_MODEL || "gemma-4-26b-a4b-it";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
