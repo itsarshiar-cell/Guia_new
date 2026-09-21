@@ -1,4 +1,4 @@
-const TRANSCRIPTION_URL = process.env.TRANSCRIPTION_URL || "http://localhost:8000/transcribe";
+const TRANSCRIPTION_MODEL = process.env.GEMINI_TRANSCRIPTION_MODEL || "gemini-3.5-transcribe";
 const MAX_HISTORY_MESSAGES = 10;
 
 const conversations = new Map();
@@ -24,6 +24,47 @@ function buildPrompt(history) {
 ${conversation}
 
 Respond clearly and helpfully. Even if the situation is unrelated to survival, answer briefly and naturally.`;
+}
+
+async function transcribeAudio(ai, wavBuffer) {
+  let uploadedAudio;
+
+  try {
+    uploadedAudio = await ai.files.upload({
+      file: new Blob([wavBuffer], { type: "audio/wav" }),
+      config: {
+        mimeType: "audio/wav",
+        displayName: "speech.wav",
+      },
+    });
+
+    if (!uploadedAudio.uri) {
+      throw new Error("Gemini did not return an audio file URI.");
+    }
+
+    const interaction = await ai.interactions.create({
+      model: TRANSCRIPTION_MODEL,
+      input: [
+        {
+          type: "audio",
+          uri: uploadedAudio.uri,
+          mime_type: uploadedAudio.mimeType || "audio/wav",
+        },
+      ],
+    });
+
+    if (interaction.status !== "completed") {
+      throw new Error(`Gemini transcription did not complete (status: ${interaction.status}).`);
+    }
+
+    return interaction.output_text?.trim() || "";
+  } finally {
+    if (uploadedAudio?.name) {
+      await ai.files.delete({ name: uploadedAudio.name }).catch((error) => {
+        console.warn("Could not delete temporary Gemini audio file:", error);
+      });
+    }
+  }
 }
 
 async function respondToMessage(socket, text, ai, modelName) {
@@ -75,30 +116,11 @@ export function registerAudioSocket(namespace, {ai, modelName}) {
           bytes: wavBuffer.length,
         });
 
-        const formData = new FormData();
-        const audioBlob = new Blob([wavBuffer], { type: "audio/wav" });
-
-        formData.append("file", audioBlob, "speech.wav");
-
-        const response = await fetch(TRANSCRIPTION_URL, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) {
-          const message = await response.text();
-          socket.emit("audio-error", {
-            message: `Transcription failed: ${message}`,
-          });
-          return;
-        }
-
-        const data = await response.json();
-        const transcript = data.text?.trim();
+        const transcript = await transcribeAudio(ai, wavBuffer);
 
         if (!transcript) {
           socket.emit("audio-error", {
-            message: "Whisper returned an empty transcript. No text returned.",
+            message: "Gemini returned an empty transcript. No text returned.",
           });
           return;
         }
