@@ -1,18 +1,6 @@
+import { getRecentHistory, addMessage, enqueue, clearSession } from "../conversations.js";
+
 const TRANSCRIPTION_MODEL = process.env.GEMINI_TRANSCRIPTION_MODEL || "gemini-3.5-transcribe";
-const MAX_HISTORY_MESSAGES = 10;
-
-const conversations = new Map();
-
-function getRecentHistory(socketId) {
-  return conversations.get(socketId) || [];
-}
-
-function addMessage(socketId, message) {
-  const history = getRecentHistory(socketId);
-  const nextHistory = [...history, message].slice(-MAX_HISTORY_MESSAGES);
-  conversations.set(socketId, nextHistory);
-  return nextHistory;
-}
 
 function buildPrompt(history) {
   const conversation = history
@@ -67,42 +55,45 @@ async function transcribeAudio(ai, wavBuffer) {
   }
 }
 
+// Handshake allows multiple sockets to share a conversation session. The sessionId is used to identify the conversation history and task queue for that session. If no sessionId is provided, the socket's own ID is used as the session key.
 async function respondToMessage(socket, text, ai, modelName) {
-  const history = addMessage(socket.id, {
-    role: "user",
-    text,
-  });
+  const sessionId = socket.handshake?.auth?.sessionId || socket.handshake?.query?.sessionId || socket.id;
 
-  const prompt = buildPrompt(history);
-  const stream = await ai.models.generateContentStream({
-    model: modelName,
-    contents: [{ text: prompt }],
-  });
+  // add the user's message immediately to history so the queued generator sees it
+  const history = addMessage(sessionId, { role: "user", text });
 
-  let assistantText = "";
-  socket.emit("audio-response-start");
-
-  for await (const chunk of stream) {
-    const chunkText = chunk.text;
-    if (chunkText) {
-      assistantText += chunkText;
-      socket.emit("audio-response-chunk", { text: chunkText });
-    }
-  }
-
-  if (assistantText.trim()) {
-    addMessage(socket.id, {
-      role: "assistant",
-      text: assistantText.trim(),
+  // enqueue the actual generation so only one response runs per session at a time
+  await enqueue(sessionId, async () => {
+    const prompt = buildPrompt(getRecentHistory(sessionId));
+    const stream = await ai.models.generateContentStream({
+      model: modelName,
+      contents: [{ text: prompt }],
     });
-  }
 
-  socket.emit("audio-response-complete");
+    let assistantText = "";
+    socket.emit("audio-response-start");
+
+    for await (const chunk of stream) {
+      const chunkText = chunk.text;
+      if (chunkText) {
+        assistantText += chunkText;
+        socket.emit("audio-response-chunk", { text: chunkText });
+      }
+    }
+
+    if (assistantText.trim()) {
+      addMessage(sessionId, { role: "assistant", text: assistantText.trim() });
+    }
+
+    socket.emit("audio-response-complete");
+  });
 }
 
 export function registerAudioSocket(namespace, {ai, modelName}) {
   namespace.on("connection", (socket) => {
     console.log(`Audio client connected: ${socket.id}`);
+    const initialSessionId = socket.handshake?.auth?.sessionId || socket.handshake?.query?.sessionId || socket.id;
+    console.log(`Audio client sessionId resolved: ${initialSessionId}`);
 
     socket.on("audio-start", () => {
       socket.emit("audio-event-ack", { type: "audio-start" });
@@ -110,6 +101,8 @@ export function registerAudioSocket(namespace, {ai, modelName}) {
 
     socket.on("audio-frame", async (frame) => {
       try {
+        const sessionId = socket.handshake?.auth?.sessionId || socket.handshake?.query?.sessionId || socket.id;
+        console.log(`audio-frame received for sessionId: ${sessionId}`);
         const wavBuffer = Buffer.isBuffer(frame) ? frame : Buffer.from(frame);
 
         socket.emit("audio-frame-ack", {
@@ -147,6 +140,8 @@ export function registerAudioSocket(namespace, {ai, modelName}) {
       }
 
       try {
+        const sessionId = socket.handshake?.auth?.sessionId || socket.handshake?.query?.sessionId || socket.id;
+        console.log(`text-message received for sessionId: ${sessionId} text=${text.slice(0,80)}`);
         await respondToMessage(socket, text, ai, modelName);
       } catch (error) {
         socket.emit("audio-error", {
@@ -160,7 +155,9 @@ export function registerAudioSocket(namespace, {ai, modelName}) {
     });
 
     socket.on("disconnect", () => {
-      conversations.delete(socket.id);
+      const sessionId = socket.handshake?.auth?.sessionId || socket.handshake?.query?.sessionId || socket.id;
+      // only clear session data if it was using the socket id as the session key
+      if (sessionId === socket.id) clearSession(sessionId);
       console.log(`Audio client disconnected: ${socket.id}`);
     });
   });

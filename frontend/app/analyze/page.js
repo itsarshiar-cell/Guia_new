@@ -120,14 +120,23 @@ export default function AnalyzePage() {
     import("socket.io-client").then(({ default: io }) => {
       const socketServerUrl = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL;
 
+      // generate or reuse a stable sessionId for this browser session
+      let sessionId = localStorage.getItem("guia_session_id");
+      if (!sessionId) {
+        sessionId = crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        localStorage.setItem("guia_session_id", sessionId);
+      }
+
       const socket = io(`${socketServerUrl}/visual`, {
         reconnection: true,
         transports: ["websocket"],
+        auth: { sessionId },
       });
 
       const audioSocket = io(`${socketServerUrl}/audio`, {
         reconnection: true,
         transports: ["websocket"],
+        auth: { sessionId },
       });
 
       socket.on("connect", () => {
