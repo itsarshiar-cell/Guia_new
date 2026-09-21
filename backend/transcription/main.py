@@ -6,7 +6,7 @@ import os
 
 app = FastAPI()
 
-model = whisper.load_model("base")
+model = whisper.load_model("tiny")
 
 
 class TranscriptionResponse(BaseModel):
